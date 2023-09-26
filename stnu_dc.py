@@ -319,7 +319,7 @@ def dc_dijkstra(
     The main function of the DC-checking algorithm.
 
     Implements Bhargava et al.'s Algorithm 2, which is based on
-    Morris' determineDC procedure.
+    Morris' DCbackprop procedure.
     """
 
     call_stack.append(start_node)
