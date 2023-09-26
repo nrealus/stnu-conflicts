@@ -13,4 +13,5 @@ TODO:
 - More documentation relating to STNU theory (which I need a deeper understanding of).
 
 [1]: [Bhargava, N., Vaquero, T. S., & Williams, B. C. (2017, August). Faster Conflict Generation for Dynamic Controllability. In IJCAI (pp. 4280-4286)](http://mers-papers.csail.mit.edu/Conference/2017/IJCAI17_Bhargava/RelaxIDC.pdf)
+
 [2]: [Wang, A.J. Risk-Bounded Dynamic Scheduling of Temporal Plans (2022) (PhD Thesis)](https://dspace.mit.edu/handle/1721.1/147542)
