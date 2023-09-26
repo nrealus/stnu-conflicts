@@ -127,12 +127,6 @@ class STNU(NamedTuple):
 
         return stnu
 
-#SRNCNestedPaths = List[List[Tuple[Node, Node]]]
-"""
-Used to represent the paths composing a semi-reducible negative cycle, which
-may in turn contain a nested semi-reducible negative cycle path as well.
-"""
-
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 def convert_stnu_to_normal_form(
