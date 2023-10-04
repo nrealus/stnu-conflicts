@@ -20,8 +20,6 @@ from typing import Dict, List, NamedTuple, Optional, Set, Tuple, Iterable
 from enum import Enum
 
 #################################################################################
-#
-#################################################################################
 
 Node = str
 """A type representing the nodes in an STNU (i.e. timepoints)."""
@@ -29,8 +27,10 @@ Node = str
 Weight = float
 """
 A type representing the weight of an edge in an STNU
-(i.e. "distance" between two timepoints).
+(i.e. "distance" between two nodes).
 """
+
+# # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 class Label(NamedTuple):
     """
@@ -39,10 +39,12 @@ class Label(NamedTuple):
     Similarly, nodes with `kind = Kind.LOWERCASE` or
     `kind = Kind.UPPERCASE` must have `node != None`
     """
+
     class Kind(Enum):
         NONE = 0
         UPPERCASE = 1
         LOWERCASE = 2
+
     kind: Kind
     node: Optional[Node]
 
@@ -62,34 +64,34 @@ class Label(NamedTuple):
     ):
         return Label(Label.Kind.UPPERCASE, node)
 
-InverseLDG = Dict[Node, Dict[Node, Tuple[Weight, Label]]]
-"""
-Inverse (or reverse) "view" of a "Labeled Distance Graph" (LDG).
-
-The key of the outer dictionary represents the target (not source!)
-node of an STNU edge. The inner dictionary represents the source as
-well as the weight and label of this STNU edge.
-
-Example: `inverse_ldg[tgt_node] = { src_node: (w1, l1), src2: (w2, l2), ...}`
-"""
-
-Edge = Tuple[Node, Node, Weight, Label]
+Edge = Tuple[Node, Node, Label, Weight]
 """
 Representation of an STNU edge as a tuple:
 
-source node, target node, weight, label
+(source node, target node, label, weight)
 """
+
 # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # # #
 
 class STNU(NamedTuple):
-    inverse_ldg: InverseLDG
+
+    reverse_adjacency: Dict[Node, Set[Node]]
     """
-    Contains the (inverse) labeled distance graph
-    representation of the STNU.
+    The reverse adjacency set/list representation.
+    
+    The key of the dictionary represents the target node of an edge in the STNU.
+    The value of the dictionary corresponds to the set of source nodes of STNU
+    edges incoming to the target node.
     """
+
+    labeled_weights: Dict[Tuple[Node, Node], Tuple[Label, Weight]]
+    """
+    Stores the label and weight of an STNU edge (source node, target node).
+    """
+
     contingent_links: Set[Tuple[Node, Node]]
     """
-    Contains the contingent links of the STNU.
+    Contains the contingent links (source node, target node) of the STNU.
     """
 
     @classmethod
@@ -98,32 +100,44 @@ class STNU(NamedTuple):
         contingent: List[Tuple[Node, Tuple[Weight, Weight], Node]],
     ):
 
-        stnu = STNU({}, { (src_node, tgt_node) 
-                    for (src_node, (_, _), tgt_node) in contingent})
-
+        stnu = STNU({}, {}, set())
+        
         for (src_node, (l, u), tgt_node) in contingent:
             
-            if ((tgt_node in stnu.inverse_ldg and src_node in stnu.inverse_ldg[tgt_node])
-                or (src_node in stnu.inverse_ldg and tgt_node in stnu.inverse_ldg[src_node])
+            if ((tgt_node in stnu.reverse_adjacency and src_node in stnu.reverse_adjacency[tgt_node])
+                or (src_node in stnu.reverse_adjacency and tgt_node in stnu.reverse_adjacency[src_node])
             ):
-                raise ValueError("Input edges not unique: there is more than one edge defined between two nodes.")
+                raise ValueError("Two links defined between the same two nodes.")
 
-            stnu.inverse_ldg.setdefault(tgt_node, {})[src_node] = (l, Label.lowercase(tgt_node))
-            stnu.inverse_ldg.setdefault(src_node, {})[tgt_node] = (-u, Label.uppercase(tgt_node))
+            stnu.reverse_adjacency.setdefault(tgt_node, set()).add(src_node)
+            stnu.labeled_weights[(src_node, tgt_node)] = (Label.lowercase(tgt_node), l)
 
-        for (src_node, ws, tgt_node) in ordinary:
+            stnu.reverse_adjacency.setdefault(src_node, set()).add(tgt_node)
+            stnu.labeled_weights[(tgt_node, src_node)] = (Label.uppercase(tgt_node), -u)
 
-            if ((tgt_node in stnu.inverse_ldg and src_node in stnu.inverse_ldg[tgt_node])
-                or (src_node in stnu.inverse_ldg and tgt_node in stnu.inverse_ldg[src_node])
+            stnu.contingent_links.add((src_node, tgt_node))
+
+        for (src_node, w_or_l_u, tgt_node) in ordinary:
+
+            if ((tgt_node in stnu.reverse_adjacency and src_node in stnu.reverse_adjacency[tgt_node])
+                or (src_node in stnu.reverse_adjacency and tgt_node in stnu.reverse_adjacency[src_node])
             ):
-                raise ValueError("Input edges not unique: there is more than one edge defined between two nodes.")
+                raise ValueError("Two links defined between the same two nodes.")
 
-            if isinstance(ws, tuple):
-                l, u = ws
-                stnu.inverse_ldg.setdefault(tgt_node, {})[src_node] = (u, Label.nocase())
-                stnu.inverse_ldg.setdefault(src_node, {})[tgt_node] = (-l, Label.nocase())
+            if isinstance(w_or_l_u, tuple):
+                l, u = w_or_l_u
+
+                stnu.reverse_adjacency.setdefault(tgt_node, set()).add(src_node)
+                stnu.labeled_weights[(src_node, tgt_node)] = (Label.nocase(), u)
+
+                stnu.reverse_adjacency.setdefault(src_node, set()).add(tgt_node)
+                stnu.labeled_weights[(tgt_node, src_node)] = (Label.nocase(), -l)
+
             else:
-                stnu.inverse_ldg.setdefault(tgt_node, {})[src_node] = (ws, Label.nocase())
+                w = w_or_l_u
+
+                stnu.reverse_adjacency.setdefault(tgt_node, set()).add(src_node)
+                stnu.labeled_weights[(src_node, tgt_node)] = (Label.nocase(), w)
 
         return stnu
 
@@ -135,26 +149,28 @@ def convert_stnu_to_normal_form(
     """
     Converts the given STNU into a new STNU in "normal form".
 
-    The normal form of an original STNU, is a STNU where the original
-    contingent links have been split in two links: one ordinary (or
+    The normal form STNU of an original STNU, is a STNU where the original
+    contingent links have been split into two links: one ordinary (or
     requirement) link, and one contingent link. Both of these links
-    are connected using a newly added helper node. The length of the
-    newly created ordinary link is fixed / constant, and the lower
-    bound of the duration of the contingent link is 0.
+    are connected using a newly added "helper" node. The length of the
+    newly created ordinary link is fixed (lower bound = -upper bound),
+    and the lower bound of the duration of the new contingent link is 0.
 
     Example: The contingent link A ==[l,u]==> C is transformed into
     these two links: A --[l,l]--> A'' ==[0,u-l]==> C.
 
     Returns:
         - A new STNU, corresponding to the "normal form" of the original STNU.
+        
         - A mapping from the helper nodes in the new STNU to the
         original STNU contingent links that these nodes helped to split.
 
     """
     
-    normal_form_stnu = STNU({ node : stnu.inverse_ldg[node].copy()
-                              for node in stnu.inverse_ldg },
-                            set())
+    normal_form_stnu = STNU({ node : stnu.reverse_adjacency[node].copy()
+                              for node in stnu.reverse_adjacency },
+                            stnu.labeled_weights.copy(),
+                            stnu.contingent_links.copy())
 
     normal_form_stnu_helper_nodes: Dict[Node, Tuple[Node, Node]] = {}
 
@@ -162,24 +178,32 @@ def convert_stnu_to_normal_form(
 
     for src_node, tgt_node in stnu.contingent_links:
 
-        weight_src_to_tgt = stnu.inverse_ldg[tgt_node][src_node][0]
-        weight_tgt_to_src = -stnu.inverse_ldg[src_node][tgt_node][0]
+        weight_src_to_tgt = stnu.labeled_weights[(src_node, tgt_node)][1]
+        weight_tgt_to_src = -stnu.labeled_weights[(tgt_node, src_node)][1]
 
-        normal_form_stnu.inverse_ldg[tgt_node].pop(src_node)
-        normal_form_stnu.inverse_ldg[src_node].pop(tgt_node)
+        normal_form_stnu.reverse_adjacency[tgt_node].remove(src_node)
+        normal_form_stnu.reverse_adjacency[src_node].remove(tgt_node)
 
         helpers_counter += 1
         helper_node = Node(src_node+"''"+str(helpers_counter))
 
-        normal_form_stnu.inverse_ldg[helper_node] = {}
+        normal_form_stnu.reverse_adjacency[helper_node] = set()
 
-        normal_form_stnu.inverse_ldg[helper_node][src_node] = (weight_src_to_tgt, Label.nocase())
-        normal_form_stnu.inverse_ldg[src_node][helper_node] = (-weight_src_to_tgt, Label.nocase())
-        normal_form_stnu.inverse_ldg[tgt_node][helper_node] = (Weight(0), Label.lowercase(tgt_node))
-        normal_form_stnu.inverse_ldg[helper_node][tgt_node] = (weight_src_to_tgt - weight_tgt_to_src,
-                                                               Label.uppercase(tgt_node))
+        normal_form_stnu.reverse_adjacency[helper_node].add(src_node)
+        normal_form_stnu.labeled_weights[(src_node, helper_node)] = (Label.nocase(), weight_src_to_tgt)
+
+        normal_form_stnu.reverse_adjacency[src_node].add(helper_node)
+        normal_form_stnu.labeled_weights[(helper_node, src_node)] = (Label.nocase(), -weight_src_to_tgt)
+
+        normal_form_stnu.reverse_adjacency[tgt_node].add(helper_node)
+        normal_form_stnu.labeled_weights[(helper_node, tgt_node)] = (Label.lowercase(tgt_node), Weight(0))
+
+        normal_form_stnu.reverse_adjacency[helper_node].add(tgt_node)
+        normal_form_stnu.labeled_weights[(tgt_node, helper_node)] = (Label.uppercase(tgt_node), weight_src_to_tgt
+                                                                                                - weight_tgt_to_src)
 
         normal_form_stnu.contingent_links.add((helper_node, tgt_node))
+
         normal_form_stnu_helper_nodes[helper_node] = (src_node, tgt_node)
 
     return (normal_form_stnu, normal_form_stnu_helper_nodes)
@@ -188,35 +212,35 @@ def convert_stnu_to_normal_form(
 
 def check_stnu_dc(
     stnu: STNU,
-) -> Tuple[bool, List[List]]:
+) -> Tuple[bool, List[List[Tuple[Node, Node]]]]:
     """
     Checks whether the given STNU is dynamically controllable (DC),
     and if not, provides a reason to why it isn't, in the form of a
-    set of "conflicts" (which are specific paths from the semi-reducible
-    negative cycle found to prove that the STNU is not DC).
+    set of "conflicts". These take the form of a semi-reducible
+    negative cycle (SRNC) combined with a (possibly empty) set
+    of "extension paths" of lowercase edges appearing in the SRNC.
 
     Implements the top level of Morris' O(n^3) DC-checking algorithm,
     with slight modifications as in Bhargava et al. (Algorithm 1).
 
     Returns:
-        - Whether the STNU is dynamically controllable
-        - If the STNU is not dynamically controllable, a set of "conflicts".
+        - Whether the STNU is DC.
+
+        - If the STNU is not DC, a set of "conflicts".
     """
     
     # The inverse labeled distance graph of the normal
     # form STNU may be modified by `dc_disjktra`. Newly added edges
     normal_form_stnu, normal_form_stnu_helper_nodes = convert_stnu_to_normal_form(stnu)
 
-    _normal_form_stnu_inverse_ldg_copy = { node: incoming.copy()
-                                           for node, incoming in normal_form_stnu.inverse_ldg.items() }
-
     # The booleans in `negative_nodes` indicate whether a negative node
-    # (i.e. a node with a negative edge directed at it) has already been
-    # (successfully) processed during `dc_dijkstra`, meaning it that there
-    # are no semi-reducible negative cycle starting (backwards) from that node.
-    negative_nodes: Dict[Node, bool] = { node: False
-                                          for node, incoming in normal_form_stnu.inverse_ldg.items()
-                                          for _, (weight, _) in incoming.items() if weight < 0 }
+    # (i.e. a node with an incoming edge with a negative weight) has
+    # already been (successfully) processed during `dc_dijkstra`,
+    # (i.e. no SRNC was found by starting backwards from that node).
+    negative_nodes: Dict[Node, bool] = { tgt_node: False
+                                         for tgt_node, src_nodes in normal_form_stnu.reverse_adjacency.items()
+                                         for src_node in src_nodes
+                                         if normal_form_stnu.labeled_weights[(src_node, tgt_node)][1] < 0 }
 
     # The edges newly added to the (normal form) STNU during runs of `dc_dijkstra`.
     # Note that updated already existing edges won't be recorded.
@@ -235,7 +259,8 @@ def check_stnu_dc(
             continue
 
         dc, raw_paths, _ = dc_dijkstra(start_node,
-                                       normal_form_stnu.inverse_ldg,
+                                       normal_form_stnu.reverse_adjacency,
+                                       normal_form_stnu.labeled_weights,
                                        novel_edges,
                                        negative_nodes,
                                        distances_to,
@@ -293,7 +318,7 @@ def check_stnu_dc(
             for conflict in conflicts:
                 w = 0
                 for src_node, tgt_node in conflict:
-                    w += stnu.inverse_ldg[tgt_node][src_node][0]
+                    w += stnu.labeled_weights[(src_node, tgt_node)][1]
                 ws.append(w)
             print(ws)
             
@@ -307,7 +332,8 @@ def check_stnu_dc(
 
 def dc_dijkstra(
     start_node: Node,
-    normal_form_stnu_inverse_ldg: InverseLDG,
+    normal_form_stnu_reverse_adjacency: Dict[Node, Set[Node]],
+    normal_form_stnu_labeled_weights: Dict[Tuple[Node, Node], Tuple[Label, Weight]],
     novel_edges: Set[Tuple[Node, Node]],
     negative_nodes: Dict[Node, bool],
     distances_to: Dict[Node, Dict[Node, Tuple[Weight, Optional[Edge]]]],
@@ -337,8 +363,10 @@ def dc_dijkstra(
     distances_to_start_node_from: Dict[Node, Tuple[Weight, Optional[Edge]]] = \
         { start_node : (Weight(0), None) }
 
-    for e_source_node, (e_weight, e_label) in normal_form_stnu_inverse_ldg[start_node].items():
-        edge: Edge = (e_source_node, start_node, e_weight, e_label)
+    for e_source_node in normal_form_stnu_reverse_adjacency[start_node]:
+
+        e_label, e_weight = normal_form_stnu_labeled_weights[(e_source_node, start_node)]
+        edge: Edge = (e_source_node, start_node, e_label, e_weight)
 
         if e_weight < 0:
             distances_to_start_node_from[e_source_node] = (e_weight, edge)
@@ -357,17 +385,19 @@ def dc_dijkstra(
         weight: Weight
 
         if weight >= 0:
-            if (start_node not in normal_form_stnu_inverse_ldg
-                or node not in normal_form_stnu_inverse_ldg[start_node]
+            if (start_node not in normal_form_stnu_reverse_adjacency
+                or node not in normal_form_stnu_reverse_adjacency[start_node]
             ):
                 novel_edges.add((node, start_node))
-            normal_form_stnu_inverse_ldg[start_node][node] = (weight, Label.nocase())
+            normal_form_stnu_reverse_adjacency.setdefault(start_node, set()).add(node)
+            normal_form_stnu_labeled_weights[(node, start_node)] = (Label.nocase(), weight)
             continue
 
         if node in negative_nodes:
 
             srnc_found, raw_paths, end_node = dc_dijkstra(node,
-                                                          normal_form_stnu_inverse_ldg,
+                                                          normal_form_stnu_reverse_adjacency,
+                                                          normal_form_stnu_labeled_weights,
                                                           novel_edges,
                                                           negative_nodes,
                                                           distances_to,
@@ -387,8 +417,10 @@ def dc_dijkstra(
                 call_stack.pop()
                 return False, raw_paths, end_node
 
-        for e_source_node, (e_weight, e_label) in normal_form_stnu_inverse_ldg[node].items():
-            edge: Edge = (e_source_node, node, e_weight, e_label)
+        for e_source_node in normal_form_stnu_reverse_adjacency[node]:
+
+            e_label, e_weight = normal_form_stnu_labeled_weights[(e_source_node, node)]
+            edge: Edge = (e_source_node, node, e_label, e_weight)
 
             if e_weight < 0:
                 continue
@@ -542,7 +574,7 @@ def process_raw_path(
             elif i < n-1:
                 
                 s, t = normal_form_stnu_helper_nodes[tgt_node]
-                ss, tt = normal_form_edges_path[i+1]
+                _, tt = normal_form_edges_path[i+1]
                 
                 if src_node == tt:
                     if src_node == s:
